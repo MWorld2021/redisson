@@ -42,6 +42,7 @@ import java.util.function.Supplier;
 
 /**
  * Base class for implementing distributed locks
+ * 用于实现分布式锁的基类
  *
  * @author Danila Varatyntsev
  * @author Nikita Koksharov
@@ -118,9 +119,7 @@ public abstract class RedissonBaseLock extends RedissonExpirable implements RLoc
     }
 
     /**
-     * Returns lock name
-     *
-     * @return lock name
+     * Returns entry name
      */
     protected String getEntryName() {
         return entryName;
@@ -128,8 +127,6 @@ public abstract class RedissonBaseLock extends RedissonExpirable implements RLoc
 
     /**
      * Returns lock name
-     *
-     * @return lockName
      */
     protected String getLockName(long threadId) {
         return id + ":" + threadId;
@@ -332,33 +329,55 @@ public abstract class RedissonBaseLock extends RedissonExpirable implements RLoc
         return unlockAsync(threadId);
     }
 
+    /**
+     * 执行 RFuture 对象的方法，支持重试
+     *
+     * @param supplier 获取 RFuture 对象的方法
+     * @param <T>      RFuture 对象的类型
+     * @return 包装了 CompletableFuture 对象的 CompletableFutureWrapper 对象
+     */
     protected final <T> RFuture<T> execute(Supplier<RFuture<T>> supplier) {
+        // 创建了一个CompletableFuture对象result，并获取了重试次数retryAttempts。
         CompletableFuture<T> result = new CompletableFuture<>();
         int retryAttempts = commandExecutor.getServiceManager().getConfig().getRetryAttempts();
+        // 使用AtomicInteger类型的attempts变量来记录当前重试次数。
         AtomicInteger attempts = new AtomicInteger(retryAttempts);
+        // 调用execute方法，重试执行RFuture对象的方法。
         execute(attempts, result, supplier);
+        // 最后，返回一个CompletableFutureWrapper对象，该对象包装了result对象。
         return new CompletableFutureWrapper<>(result);
     }
 
+    /**
+     * 重试执行 RFuture 对象的方法
+     *
+     * @param attempts 重试次数
+     * @param result   CompletableFuture对象
+     * @param supplier 获取RFuture对象的方法
+     */
     private <T> void execute(AtomicInteger attempts, CompletableFuture<T> result, Supplier<RFuture<T>> supplier) {
+        // 调用supplier.get()方法获取一个RFuture对象future。
         RFuture<T> future = supplier.get();
+        // 为future对象添加一个回调函数，当future对象执行完成时，会调用该回调函数。使用whenComplete方法对future对象进行处理。
         future.whenComplete((r, e) -> {
             if (e != null) {
+                // 如果错误信息中包含None of slaves were synced，则判断当前重试次数是否已经达到上限，
                 if (e.getCause().getMessage().equals("None of slaves were synced")) {
+                    // 如果达到上限则抛出异常，
                     if (attempts.decrementAndGet() < 0) {
                         result.completeExceptionally(e);
                         return;
                     }
-
+                    // 否则等待一段时间后再次调用execute方法进行重试。
                     commandExecutor.getServiceManager().newTimeout(t -> execute(attempts, result, supplier),
                             commandExecutor.getServiceManager().getConfig().getRetryInterval(), TimeUnit.MILLISECONDS);
                     return;
                 }
-
+                // 如果错误信息中不包含None of slaves were synced，则直接抛出异常。
                 result.completeExceptionally(e);
                 return;
             }
-
+            // 如果future对象执行成功，则调用result.complete(r)方法将结果传递给result对象；
             result.complete(r);
         });
     }

@@ -76,6 +76,7 @@ public class RedissonLock extends RedissonBaseLock {
     @Override
     public void lock() {
         try {
+            // 尝试获取锁，等待时间为 -1，租约时间为 null，不可中断
             lock(-1, null, false);
         } catch (InterruptedException e) {
             throw new IllegalStateException();
@@ -85,6 +86,7 @@ public class RedissonLock extends RedissonBaseLock {
     @Override
     public void lock(long leaseTime, TimeUnit unit) {
         try {
+            // 尝试获取锁，等待时间为 leaseTime，租约时间为 unit，不可中断
             lock(leaseTime, unit, false);
         } catch (InterruptedException e) {
             throw new IllegalStateException();
@@ -94,28 +96,33 @@ public class RedissonLock extends RedissonBaseLock {
 
     @Override
     public void lockInterruptibly() throws InterruptedException {
+        // 尝试获取锁，等待时间为 -1，租约时间为 null，可中断
         lock(-1, null, true);
     }
 
     @Override
     public void lockInterruptibly(long leaseTime, TimeUnit unit) throws InterruptedException {
+        // 尝试获取锁，等待时间为 leaseTime，租约时间为 unit，可中断
         lock(leaseTime, unit, true);
     }
 
     private void lock(long leaseTime, TimeUnit unit, boolean interruptibly) throws InterruptedException {
-        // 获取当前线程的 id = 标识符
+        // 获取当前线程的 id = 标识符 / Get the ID of the current thread
         long threadId = Thread.currentThread().getId();
-        // 尝试获取锁
+        // 尝试获取锁 / Attempt to acquire the lock
         Long ttl = tryAcquire(-1, leaseTime, unit, threadId);
-        // lock acquired
+        // lock acquired 锁获取成功 / If the lock is acquired successfully, return
         if (ttl == null) {
             return;
         }
-        // waiting for message
+        // waiting for message 订阅锁的通道并等待指示锁已释放的消息 / Subscribe to the lock's channel and wait for a message indicating that the lock has been released
         CompletableFuture<RedissonLockEntry> future = subscribe(threadId);
+        // 等待订阅成功，设置超时时间，以确保在等待锁时不会无限期地阻塞。具体来说，它会将 future 作为参数传递给 timeout 方法，该方法将在一定时间后取消订阅 future。这样，如果在等待锁时发生超时，future 将被取消订阅，从而使线程能够继续执行。
         pubSub.timeout(future);
+        // 获取订阅成功的结果 / Get the result of the subscription
         RedissonLockEntry entry;
         if (interruptibly) {
+            // 如果是可中断的，获取中断的 future
             entry = commandExecutor.getInterrupted(future);
         } else {
             entry = commandExecutor.get(future);
@@ -123,15 +130,18 @@ public class RedissonLock extends RedissonBaseLock {
 
         try {
             while (true) {
+                // 尝试获取锁 / Attempt to acquire the lock
                 ttl = tryAcquire(-1, leaseTime, unit, threadId);
-                // lock acquired
+                // lock acquired 如果锁获取成功，直接跳出循环 / If the lock is acquired successfully, break the loop
                 if (ttl == null) {
                     break;
                 }
 
-                // waiting for message
+                // waiting for message 等待锁释放的消息
                 if (ttl >= 0) {
                     try {
+                        // 尝试获取 permit，Semaphore 的 tryAcquire 方法是尝试获取一个许可证，如果当前有可用的许可证，则获取许可证并返回 true，否则返回 false。
+                        // 如果 tryAcquire 方法返回 false，则可以使用 acquire 方法等待许可证变为可用。
                         entry.getLatch().tryAcquire(ttl, TimeUnit.MILLISECONDS);
                     } catch (InterruptedException e) {
                         if (interruptibly) {
@@ -141,24 +151,43 @@ public class RedissonLock extends RedissonBaseLock {
                     }
                 } else {
                     if (interruptibly) {
+                        // 获取 permit
                         entry.getLatch().acquire();
                     } else {
+                        // blocking until one is available
                         entry.getLatch().acquireUninterruptibly();
                     }
                 }
             }
         } finally {
-            // 等待都超时了，直接取消订阅
+            // 等待都超时了，直接取消订阅锁的 channel / If all the waiting times are over, cancel the subscription to the channel
             unsubscribe(entry, threadId);
         }
 //        get(lockAsync(leaseTime, unit));
     }
 
+    /***
+     * 尝试获取锁
+     * @param waitTime 等待锁变为可用的最长时间。如果在此时间内锁不可用，则该方法将返回 null。
+     * @param leaseTime 锁将被持有的时间。如果 leaseTime 大于 0，则在 leaseTime 经过后，锁将自动释放。如果 leaseTime 小于或等于 0，则锁将一直保持，直到显式释放。
+     * @param unit waitTime 和 leaseTime 的时间单位。
+     * @param threadId 尝试获取锁的线程的 ID。
+     * @return 返回一个 Long 值，表示锁释放剩余的时间，如果成功获取锁，则返回 null。
+     */
     private Long tryAcquire(long waitTime, long leaseTime, TimeUnit unit, long threadId) {
         return get(tryAcquireAsync0(waitTime, leaseTime, unit, threadId));
     }
 
+    /***
+     * 异步尝试获取锁
+     * @param waitTime 等待锁变为可用的最长时间。如果在此时间内锁不可用，则该方法将返回 null。
+     * @param leaseTime 锁将被持有的时间。如果 leaseTime 大于 0，则在 leaseTime 经过后，锁将自动释放。如果 leaseTime 小于或等于 0，则锁将一直保持，直到显式释放。
+     * @param unit waitTime 和 leaseTime 的时间单位。
+     * @param threadId 尝试获取锁的线程的 ID。
+     * @return 返回一个 RFuture<Long> 对象
+     */
     private RFuture<Long> tryAcquireAsync0(long waitTime, long leaseTime, TimeUnit unit, long threadId) {
+        /*tryAcquireAsync0 is a helper method that executes tryAcquireAsync asynchronously.*/
         return execute(() -> tryAcquireAsync(waitTime, leaseTime, unit, threadId));
     }
 
