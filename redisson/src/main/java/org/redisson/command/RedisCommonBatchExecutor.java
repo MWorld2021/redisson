@@ -61,7 +61,7 @@ public class RedisCommonBatchExecutor extends RedisExecutor<Object, Void> {
         this.entry = entry;
         this.slots = slots;
         
-        if (options.getRetryAttempts() > 0) {
+        if (options.getRetryAttempts() >= 0) {
             this.attempts = options.getRetryAttempts();
         }
         if (options.getRetryInterval() > 0) {
@@ -153,7 +153,8 @@ public class RedisCommonBatchExecutor extends RedisExecutor<Object, Void> {
     }
 
     protected boolean isWaitCommand(CommandData<?, ?> c) {
-        return c.getCommand().getName().equals(RedisCommands.WAIT.getName());
+        return c.getCommand().getName().equals(RedisCommands.WAIT.getName())
+                || c.getCommand().getName().equals(RedisCommands.WAITAOF.getName());
     }
 
     @Override

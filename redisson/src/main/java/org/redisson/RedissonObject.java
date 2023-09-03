@@ -1,12 +1,12 @@
 /**
  * Copyright (c) 2013-2022 Nikita Koksharov
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,8 +23,10 @@ import org.redisson.client.codec.Codec;
 import org.redisson.client.codec.StringCodec;
 import org.redisson.client.protocol.RedisCommands;
 import org.redisson.command.CommandAsyncExecutor;
+import org.redisson.connection.ServiceManager;
 import org.redisson.misc.CompletableFutureWrapper;
 import org.redisson.misc.Hash;
+import org.redisson.pubsub.PublishSubscribeService;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -39,6 +41,7 @@ import java.util.stream.StreamSupport;
  * Base Redisson object
  *
  * @author Nikita Koksharov
+ *
  */
 public abstract class RedissonObject implements RObject {
 
@@ -60,15 +63,15 @@ public abstract class RedissonObject implements RObject {
         this(commandExecutor.getServiceManager().getCfg().getCodec(), commandExecutor, name);
     }
 
-    /**
-     * 判断 name 是否包含{，并且加上前缀
-     */
     public static String prefixName(String prefix, String name) {
-        // 判断是否包含{，如果包含，就在后面加上：，如果不包含，就在前面加上{，后面加上}
         if (name.contains("{")) {
             return prefix + ":" + name;
         }
         return prefix + ":{" + name + "}";
+    }
+
+    public ServiceManager getServiceManager() {
+        return commandExecutor.getServiceManager();
     }
 
     public static String suffixName(String name, String suffix) {
@@ -82,11 +85,11 @@ public abstract class RedissonObject implements RObject {
         Spliterator<T> spliterator = Spliterators.spliteratorUnknownSize(iterator, Spliterator.NONNULL);
         return StreamSupport.stream(spliterator, false);
     }
-
+    
     protected final <V> V get(RFuture<V> future) {
         return commandExecutor.get(future);
     }
-
+    
     protected final long toSeconds(long timeout, TimeUnit unit) {
         long seconds = unit.toSeconds(timeout);
         if (timeout != 0 && seconds == 0) {
@@ -116,29 +119,29 @@ public abstract class RedissonObject implements RObject {
     public void rename(String newName) {
         get(renameAsync(newName));
     }
-
+    
     @Override
     public RFuture<Long> sizeInMemoryAsync() {
         return commandExecutor.writeAsync(getRawName(), StringCodec.INSTANCE, RedisCommands.MEMORY_USAGE, getRawName());
     }
-
+    
     public final RFuture<Long> sizeInMemoryAsync(List<Object> keys) {
         return sizeInMemoryAsync(commandExecutor, keys);
     }
 
     public final RFuture<Long> sizeInMemoryAsync(CommandAsyncExecutor commandExecutor, List<Object> keys) {
         return commandExecutor.evalWriteAsync((String) keys.get(0), StringCodec.INSTANCE, RedisCommands.EVAL_LONG,
-                "local total = 0;"
-                        + "for j = 1, #KEYS, 1 do "
-                        + "local size = redis.call('memory', 'usage', KEYS[j]); "
-                        + "if size ~= false then "
+                  "local total = 0;"
+                + "for j = 1, #KEYS, 1 do "
+                    + "local size = redis.call('memory', 'usage', KEYS[j]); "
+                    + "if size ~= false then "
                         + "total = total + size;"
-                        + "end; "
-                        + "end; "
-                        + "return total; ", keys);
+                    + "end; "
+                + "end; "
+                + "return total; ", keys);
 
     }
-
+    
     @Override
     public long sizeInMemory() {
         return get(sizeInMemoryAsync());
@@ -160,7 +163,7 @@ public abstract class RedissonObject implements RObject {
     public RFuture<Void> migrateAsync(String host, int port, int database, long timeout) {
         return commandExecutor.writeAsync(getRawName(), StringCodec.INSTANCE, RedisCommands.MIGRATE, host, port, getRawName(), database, timeout);
     }
-
+    
     @Override
     public void copy(String host, int port, int database, long timeout) {
         get(copyAsync(host, port, database, timeout));
@@ -170,7 +173,7 @@ public abstract class RedissonObject implements RObject {
     public RFuture<Void> copyAsync(String host, int port, int database, long timeout) {
         return commandExecutor.writeAsync(getRawName(), StringCodec.INSTANCE, RedisCommands.MIGRATE, host, port, getRawName(), database, timeout, "COPY");
     }
-
+    
     @Override
     public boolean move(int database) {
         return get(moveAsync(database));
@@ -232,7 +235,7 @@ public abstract class RedissonObject implements RObject {
     public RFuture<Boolean> touchAsync() {
         return commandExecutor.writeAsync(getRawName(), StringCodec.INSTANCE, RedisCommands.TOUCH, getRawName());
     }
-
+    
     @Override
     public boolean isExists() {
         return get(isExistsAsync());
@@ -255,7 +258,7 @@ public abstract class RedissonObject implements RObject {
         }
         return result;
     }
-
+    
     public void encode(Collection<Object> params, Collection<?> values) {
         try {
             for (Object object : values) {
@@ -268,7 +271,7 @@ public abstract class RedissonObject implements RObject {
             throw e;
         }
     }
-
+    
     public String getLockByMapKey(Object key, String suffix) {
         ByteBuf keyState = encodeMapKey(key);
         try {
@@ -312,7 +315,7 @@ public abstract class RedissonObject implements RObject {
             throw e;
         }
     }
-
+    
     public ByteBuf encode(Object value) {
         return commandExecutor.encode(codec, value);
     }
@@ -352,34 +355,34 @@ public abstract class RedissonObject implements RObject {
     public byte[] dump() {
         return get(dumpAsync());
     }
-
+    
     @Override
     public RFuture<byte[]> dumpAsync() {
         return commandExecutor.readAsync(getRawName(), ByteArrayCodec.INSTANCE, RedisCommands.DUMP, getRawName());
     }
-
+    
     @Override
     public void restore(byte[] state) {
         get(restoreAsync(state));
     }
-
+    
     @Override
     public RFuture<Void> restoreAsync(byte[] state) {
         return restoreAsync(state, 0, null);
     }
-
+    
     @Override
     public void restore(byte[] state, long timeToLive, TimeUnit timeUnit) {
         get(restoreAsync(state, timeToLive, timeUnit));
     }
-
+    
     @Override
     public RFuture<Void> restoreAsync(byte[] state, long timeToLive, TimeUnit timeUnit) {
         long ttl = 0;
         if (timeToLive > 0) {
             ttl = timeUnit.toMillis(timeToLive);
         }
-
+        
         return commandExecutor.writeAsync(getRawName(), StringCodec.INSTANCE, RedisCommands.RESTORE, getRawName(), ttl, state);
     }
 
@@ -387,22 +390,22 @@ public abstract class RedissonObject implements RObject {
     public void restoreAndReplace(byte[] state, long timeToLive, TimeUnit timeUnit) {
         get(restoreAndReplaceAsync(state, timeToLive, timeUnit));
     }
-
+    
     @Override
     public RFuture<Void> restoreAndReplaceAsync(byte[] state, long timeToLive, TimeUnit timeUnit) {
         long ttl = 0;
         if (timeToLive > 0) {
             ttl = timeUnit.toMillis(timeToLive);
         }
-
+        
         return commandExecutor.writeAsync(getRawName(), StringCodec.INSTANCE, RedisCommands.RESTORE, getRawName(), ttl, state, "REPLACE");
     }
-
+    
     @Override
     public void restoreAndReplace(byte[] state) {
         get(restoreAndReplaceAsync(state));
     }
-
+    
     @Override
     public RFuture<Void> restoreAndReplaceAsync(byte[] state) {
         return restoreAndReplaceAsync(state, 0, null);
@@ -445,7 +448,7 @@ public abstract class RedissonObject implements RObject {
         }
         throw new IllegalArgumentException();
     }
-
+    
     @Override
     public RFuture<Integer> addListenerAsync(ObjectListener listener) {
         if (listener instanceof ExpiredObjectListener) {
@@ -456,7 +459,7 @@ public abstract class RedissonObject implements RObject {
         }
         throw new IllegalArgumentException();
     }
-
+    
     @Override
     public void removeListener(int listenerId) {
         RPatternTopic expiredTopic = new RedissonPatternTopic(StringCodec.INSTANCE, commandExecutor, "__keyevent@*:expired");
@@ -465,7 +468,7 @@ public abstract class RedissonObject implements RObject {
         RPatternTopic deletedTopic = new RedissonPatternTopic(StringCodec.INSTANCE, commandExecutor, "__keyevent@*:del");
         deletedTopic.removeListener(listenerId);
     }
-
+    
     @Override
     public RFuture<Void> removeListenerAsync(int listenerId) {
         RPatternTopic expiredTopic = new RedissonPatternTopic(StringCodec.INSTANCE, commandExecutor, "__keyevent@*:expired");
@@ -481,6 +484,10 @@ public abstract class RedissonObject implements RObject {
         return Arrays.stream(keys)
                 .map(k -> commandExecutor.getServiceManager().getConfig().getNameMapper().map(k))
                 .collect(Collectors.toList());
+    }
+
+    protected PublishSubscribeService getSubscribeService() {
+        return commandExecutor.getConnectionManager().getSubscribeService();
     }
 
 }

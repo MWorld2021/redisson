@@ -20,7 +20,7 @@ import org.redisson.api.redisnode.*;
 import org.redisson.client.codec.Codec;
 import org.redisson.codec.JsonCodec;
 import org.redisson.command.CommandAsyncExecutor;
-import org.redisson.command.CommandSyncService;
+import org.redisson.command.CommandAsyncService;
 import org.redisson.config.Config;
 import org.redisson.config.ConfigSupport;
 import org.redisson.connection.ConnectionManager;
@@ -74,7 +74,7 @@ public class Redisson implements RedissonClient {
         if (config.isReferenceEnabled()) {
             objectBuilder = new RedissonObjectBuilder(this);
         }
-        commandExecutor = new CommandSyncService(connectionManager, objectBuilder);
+        commandExecutor = new CommandAsyncService(connectionManager, objectBuilder, RedissonObjectBuilder.ReferenceType.DEFAULT);
         evictionScheduler = new EvictionScheduler(commandExecutor);
         writeBehindService = new WriteBehindService(commandExecutor);
     }
@@ -181,6 +181,16 @@ public class Redisson implements RedissonClient {
     @Override
     public <K, V> RStream<K, V> getStream(String name, Codec codec) {
         return new RedissonStream<K, V>(codec, commandExecutor, name);
+    }
+
+    @Override
+    public RSearch getSearch() {
+        return new RedissonSearch(null, commandExecutor);
+    }
+
+    @Override
+    public RSearch getSearch(Codec codec) {
+        return new RedissonSearch(codec, commandExecutor);
     }
 
     @Override
@@ -326,7 +336,7 @@ public class Redisson implements RedissonClient {
     }
 
     @Override
-    public <K, V> RMapCache<K, V> getMapCache(String name, MapOptions<K, V> options) {
+    public <K, V> RMapCache<K, V> getMapCache(String name, MapCacheOptions<K, V> options) {
         return new RedissonMapCache<K, V>(evictionScheduler, commandExecutor, name, this, options, writeBehindService);
     }
 
@@ -336,7 +346,7 @@ public class Redisson implements RedissonClient {
     }
 
     @Override
-    public <K, V> RMapCache<K, V> getMapCache(String name, Codec codec, MapOptions<K, V> options) {
+    public <K, V> RMapCache<K, V> getMapCache(String name, Codec codec, MapCacheOptions<K, V> options) {
         return new RedissonMapCache<K, V>(codec, evictionScheduler, commandExecutor, name, this, options, writeBehindService);
     }
 
@@ -512,12 +522,12 @@ public class Redisson implements RedissonClient {
 
     @Override
     public RReliableTopic getReliableTopic(String name) {
-        return new RedissonReliableTopic(commandExecutor, name);
+        return new RedissonReliableTopic(commandExecutor, name, null);
     }
 
     @Override
     public RReliableTopic getReliableTopic(String name, Codec codec) {
-        return new RedissonReliableTopic(codec, commandExecutor, name);
+        return new RedissonReliableTopic(codec, commandExecutor, name, null);
     }
 
     @Override

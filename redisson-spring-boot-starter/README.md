@@ -2,7 +2,7 @@
 
 Integrates Redisson with Spring Boot library. Depends on [Spring Data Redis](https://github.com/redisson/redisson/tree/master/redisson-spring-data#spring-data-redis-integration) module.
 
-Supports Spring Boot 1.3.x - 3.0.x
+Supports Spring Boot 1.3.x - 3.1.x
 
 ## Usage
 
@@ -14,18 +14,17 @@ Maven
      <dependency>
          <groupId>org.redisson</groupId>
          <artifactId>redisson-spring-boot-starter</artifactId>
-         <version>3.20.1</version>
+         <version>3.23.4</version>
      </dependency>
 ```
 
 Gradle
 
 ```groovy
-     compile 'org.redisson:redisson-spring-boot-starter:3.20.1'
+     compile 'org.redisson:redisson-spring-boot-starter:3.23.4'
 ```
 
-
-Downgrade `redisson-spring-data` module if necessary to support required Spring Boot version:
+`redisson-spring-boot-starter` depends on `redisson-spring-data` module compatible with the latest version of Spring Boot. Downgrade `redisson-spring-data` module if necessary to support previous Spring Boot versions:
 
 |redisson-spring-data<br/>module name|Spring Boot<br/>version|
 |----------------------------|-------------------|
@@ -37,7 +36,28 @@ Downgrade `redisson-spring-data` module if necessary to support required Spring 
 
 ### 2. Add settings into `application.settings` file
 
-Using common spring boot settings:
+Using common Spring Boot 3.x+ settings:
+
+```yaml
+spring:
+  data:
+    redis:
+      database: 
+      host:
+      port:
+      password:
+      ssl: 
+      timeout:
+      connectTimeout:
+      clientName:
+      cluster:
+        nodes:
+      sentinel:
+        master:
+        nodes:
+```
+
+Using common Spring Boot up to 2.7.x settings:
 
 ```yaml
 spring:
@@ -57,11 +77,12 @@ spring:
       nodes:
 ```
 
+
 Using Redisson config file ([single mode](https://github.com/redisson/redisson/wiki/2.-Configuration#262-single-instance-yaml-config-format),
 [replicated mode](https://github.com/redisson/redisson/wiki/2.-Configuration#252-replicated-yaml-config-format),
 [cluster mode](https://github.com/redisson/redisson/wiki/2.-Configuration#242-cluster-yaml-config-format),
 [sentinel mode](https://github.com/redisson/redisson/wiki/2.-Configuration#272-sentinel-yaml-config-format),
-[proxy mode](https://github.com/redisson/redisson/wiki/2.-Configuration#292-proxy-mode-yaml-config-format))
+[proxy mode](https://github.com/redisson/redisson/wiki/2.-Configuration#292-proxy-mode-yaml-config-format), [multi cluster mode](https://github.com/redisson/redisson/wiki/2.-Configuration/#2102-cluster-yaml-config-format))
 
 
 ```yaml
@@ -75,7 +96,7 @@ Using Redisson settings ([single mode](https://github.com/redisson/redisson/wiki
 [replicated mode](https://github.com/redisson/redisson/wiki/2.-Configuration#252-replicated-yaml-config-format),
 [cluster mode](https://github.com/redisson/redisson/wiki/2.-Configuration#242-cluster-yaml-config-format),
 [sentinel mode](https://github.com/redisson/redisson/wiki/2.-Configuration#272-sentinel-yaml-config-format),
-[proxy mode](https://github.com/redisson/redisson/wiki/2.-Configuration#292-proxy-mode-yaml-config-format)):
+[proxy mode](https://github.com/redisson/redisson/wiki/2.-Configuration#292-proxy-mode-yaml-config-format), [multi cluster mode](https://github.com/redisson/redisson/wiki/2.-Configuration/#210-multi-cluster-mode)):
 
 ```yaml
 spring:

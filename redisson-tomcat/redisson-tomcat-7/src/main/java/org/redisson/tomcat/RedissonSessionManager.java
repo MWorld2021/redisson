@@ -29,6 +29,7 @@ import org.redisson.client.codec.Codec;
 import org.redisson.client.codec.StringCodec;
 import org.redisson.codec.CompositeCodec;
 import org.redisson.config.Config;
+import org.redisson.pubsub.PublishSubscribeService;
 
 import javax.servlet.http.HttpSession;
 import java.io.File;
@@ -159,7 +160,11 @@ public class RedissonSessionManager extends ManagerBase {
 
     public RTopic getTopic() {
         String separator = keyPrefix == null || keyPrefix.isEmpty() ? "" : ":";
-        final String name = keyPrefix + separator + "redisson:tomcat_session_updates:" + ((Context) getContainer()).getName();
+        String name = keyPrefix + separator + "redisson:tomcat_session_updates:" + getContainer().getName();
+        PublishSubscribeService ss = ((Redisson) redisson).getConnectionManager().getSubscribeService();
+        if (ss.isShardingSupported()) {
+            return redisson.getShardedTopic(name);
+        }
         return redisson.getTopic(name);
     }
     
@@ -180,7 +185,7 @@ public class RedissonSessionManager extends ManagerBase {
                 }
 
                 if (attrs.isEmpty() || (broadcastSessionEvents && getNotifiedNodes(id).contains(nodeId))) {
-                    log.info("Session " + id + " can't be found");
+                    log.debug("Session " + id + " can't be found");
                     return null;    
                 }
                 
@@ -315,10 +320,9 @@ public class RedissonSessionManager extends ManagerBase {
                             
                             if (msg instanceof SessionDestroyedMessage) {
                                 Session s = findSession(msg.getSessionId(), false);
-                                if (s == null) {
-                                    throw new IllegalStateException("Unable to find session: " + msg.getSessionId());
+                                if (s != null) {
+                                    s.expire();
                                 }
-                                s.expire();
                                 RSet<String> set = getNotifiedNodes(msg.getSessionId());
                                 set.add(nodeId);
                             }

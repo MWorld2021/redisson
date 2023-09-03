@@ -27,7 +27,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- * 
+ *
  */
 package org.redisson.client.handler;
 
@@ -40,8 +40,13 @@ import io.netty.util.CharsetUtil;
 import org.redisson.client.ChannelName;
 import org.redisson.client.protocol.CommandData;
 import org.redisson.client.protocol.RedisCommands;
+import org.redisson.config.CommandMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 /**
  * Redis protocol command encoder
@@ -52,13 +57,32 @@ import org.slf4j.LoggerFactory;
 @Sharable
 public class CommandEncoder extends MessageToByteEncoder<CommandData<?, ?>> {
 
-    public static final CommandEncoder INSTANCE = new CommandEncoder();
-    
     private final Logger log = LoggerFactory.getLogger(getClass());
 
     private static final char ARGS_PREFIX = '*';
     private static final char BYTES_PREFIX = '$';
     private static final byte[] CRLF = "\r\n".getBytes();
+
+    private static final Integer LONG_TO_STRING_CACHE_SIZE = 1000;
+
+    private static final List<byte[]> LONG_TO_STRING_CACHE = LongStream.range(0, LONG_TO_STRING_CACHE_SIZE)
+        .mapToObj(Long::toString)
+        .map(s -> s.getBytes(CharsetUtil.US_ASCII))
+        .collect(Collectors.toList());
+
+    public static byte[] longToString(long number) {
+        if (number < LONG_TO_STRING_CACHE.size()) {
+            return LONG_TO_STRING_CACHE.get((int) number);
+        } else {
+            return Long.toString(number).getBytes(CharsetUtil.US_ASCII);
+        }
+    }
+
+    private CommandMapper commandMapper;
+
+    public CommandEncoder(CommandMapper commandMapper) {
+        this.commandMapper = commandMapper;
+    }
 
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
@@ -75,7 +99,7 @@ public class CommandEncoder extends MessageToByteEncoder<CommandData<?, ?>> {
             throw e;
         }
     }
-    
+
     @Override
     protected void encode(ChannelHandlerContext ctx, CommandData<?, ?> msg, ByteBuf out) throws Exception {
         try {
@@ -84,10 +108,11 @@ public class CommandEncoder extends MessageToByteEncoder<CommandData<?, ?>> {
             if (msg.getCommand().getSubName() != null) {
                 len++;
             }
-            out.writeCharSequence(Long.toString(len), CharsetUtil.US_ASCII);
+            out.writeBytes(longToString(len));
             out.writeBytes(CRLF);
-            
-            writeArgument(out, msg.getCommand().getName().getBytes(CharsetUtil.UTF_8));
+
+            String name = commandMapper.map(msg.getCommand().getName());
+            writeArgument(out, name.getBytes(CharsetUtil.UTF_8));
             if (msg.getCommand().getSubName() != null) {
                 writeArgument(out, msg.getCommand().getSubName().getBytes(CharsetUtil.UTF_8));
             }
@@ -99,7 +124,7 @@ public class CommandEncoder extends MessageToByteEncoder<CommandData<?, ?>> {
                     buf.release();
                 }
             }
-            
+
             if (log.isTraceEnabled()) {
                 String info = out.toString(CharsetUtil.UTF_8);
                 if (RedisCommands.AUTH.equals(msg.getCommand())) {
@@ -132,18 +157,18 @@ public class CommandEncoder extends MessageToByteEncoder<CommandData<?, ?>> {
         ByteBufUtil.writeUtf8(buf, payload);
         return buf;
     }
-    
+
     private void writeArgument(ByteBuf out, byte[] arg) {
         out.writeByte(BYTES_PREFIX);
-        out.writeCharSequence(Long.toString(arg.length), CharsetUtil.US_ASCII);
+        out.writeBytes(longToString(arg.length));
         out.writeBytes(CRLF);
         out.writeBytes(arg);
         out.writeBytes(CRLF);
     }
-    
+
     private void writeArgument(ByteBuf out, ByteBuf arg) {
         out.writeByte(BYTES_PREFIX);
-        out.writeCharSequence(Long.toString(arg.readableBytes()), CharsetUtil.US_ASCII);
+        out.writeBytes(longToString(arg.readableBytes()));
         out.writeBytes(CRLF);
         out.writeBytes(arg, arg.readerIndex(), arg.readableBytes());
         out.writeBytes(CRLF);

@@ -49,12 +49,9 @@ public class RedissonSemaphore extends RedissonExpirable implements RSemaphore {
 
     private final SemaphorePubSub semaphorePubSub;
 
-    final CommandAsyncExecutor commandExecutor;
-
     public RedissonSemaphore(CommandAsyncExecutor commandExecutor, String name) {
         super(commandExecutor, name);
-        this.commandExecutor = commandExecutor;
-        this.semaphorePubSub = commandExecutor.getConnectionManager().getSubscribeService().getSemaphorePubSub();
+        this.semaphorePubSub = getSubscribeService().getSemaphorePubSub();
     }
 
     String getChannelName() {
@@ -262,7 +259,14 @@ public class RedissonSemaphore extends RedissonExpirable implements RSemaphore {
             return new CompletableFutureWrapper<>(true);
         }
 
-        return commandExecutor.evalWriteAsync(getRawName(), LongCodec.INSTANCE, RedisCommands.EVAL_BOOLEAN,
+        return commandExecutor.getServiceManager().execute(() -> {
+            RFuture<Boolean> future = tryAcquireAsync0(permits);
+            return commandExecutor.handleNoSync(future, () -> releaseAsync(permits));
+        });
+    }
+
+    private RFuture<Boolean> tryAcquireAsync0(int permits) {
+        return commandExecutor.syncedEval(getRawName(), LongCodec.INSTANCE, RedisCommands.EVAL_BOOLEAN,
                   "local value = redis.call('get', KEYS[1]); " +
                   "if (value ~= false and tonumber(value) >= tonumber(ARGV[1])) then " +
                       "local val = redis.call('decrby', KEYS[1], ARGV[1]); " +
@@ -431,10 +435,10 @@ public class RedissonSemaphore extends RedissonExpirable implements RSemaphore {
             return new CompletableFutureWrapper<>((Void) null);
         }
 
-        RFuture<Void> future = commandExecutor.evalWriteAsync(getRawName(), StringCodec.INSTANCE, RedisCommands.EVAL_VOID,
+        RFuture<Void> future = commandExecutor.syncedEval(getRawName(), StringCodec.INSTANCE, RedisCommands.EVAL_VOID,
                 "local value = redis.call('incrby', KEYS[1], ARGV[1]); " +
-                        "redis.call('publish', KEYS[2], value); ",
-                Arrays.asList(getRawName(), getChannelName()), permits);
+                        "redis.call(ARGV[2], KEYS[2], value); ",
+                Arrays.asList(getRawName(), getChannelName()), permits, getSubscribeService().getPublishCommand());
         if (log.isDebugEnabled()) {
             future.thenAccept(o -> {
                 log.debug("released, permits: {}, name: {}", permits, getName());
@@ -450,7 +454,7 @@ public class RedissonSemaphore extends RedissonExpirable implements RSemaphore {
 
     @Override
     public RFuture<Integer> drainPermitsAsync() {
-        return commandExecutor.evalWriteAsync(getRawName(), LongCodec.INSTANCE, RedisCommands.EVAL_INTEGER,
+        return commandExecutor.syncedEvalWithRetry(getRawName(), LongCodec.INSTANCE, RedisCommands.EVAL_INTEGER,
                 "local value = redis.call('get', KEYS[1]); " +
                 "if (value == false) then " +
                     "return 0; " +
@@ -477,15 +481,16 @@ public class RedissonSemaphore extends RedissonExpirable implements RSemaphore {
     
     @Override
     public RFuture<Boolean> trySetPermitsAsync(int permits) {
-        RFuture<Boolean> future = commandExecutor.evalWriteAsync(getRawName(), LongCodec.INSTANCE, RedisCommands.EVAL_BOOLEAN,
+        RFuture<Boolean> future = commandExecutor.syncedEvalWithRetry(getRawName(), LongCodec.INSTANCE, RedisCommands.EVAL_BOOLEAN,
                 "local value = redis.call('get', KEYS[1]); " +
                         "if (value == false) then "
                         + "redis.call('set', KEYS[1], ARGV[1]); "
-                        + "redis.call('publish', KEYS[2], ARGV[1]); "
+                        + "redis.call(ARGV[2], KEYS[2], ARGV[1]); "
                         + "return 1;"
                         + "end;"
                         + "return 0;",
-                Arrays.asList(getRawName(), getChannelName()), permits);
+                Arrays.asList(getRawName(), getChannelName()),
+                permits, getSubscribeService().getPublishCommand());
 
         if (log.isDebugEnabled()) {
             future.thenAccept(r -> {
@@ -506,14 +511,15 @@ public class RedissonSemaphore extends RedissonExpirable implements RSemaphore {
 
     @Override
     public RFuture<Void> addPermitsAsync(int permits) {
-        return commandExecutor.evalWriteAsync(getRawName(), LongCodec.INSTANCE, RedisCommands.EVAL_VOID,
+        return commandExecutor.syncedEvalWithRetry(getRawName(), LongCodec.INSTANCE, RedisCommands.EVAL_VOID,
                 "local value = redis.call('get', KEYS[1]); " +
                 "if (value == false) then "
                   + "value = 0;"
               + "end;"
               + "redis.call('set', KEYS[1], value + ARGV[1]); "
-              + "redis.call('publish', KEYS[2], value + ARGV[1]); ",
-                Arrays.asList(getRawName(), getChannelName()), permits);
+              + "redis.call(ARGV[2], KEYS[2], value + ARGV[1]); ",
+                Arrays.asList(getRawName(), getChannelName()),
+                permits, getSubscribeService().getPublishCommand());
     }
 
 

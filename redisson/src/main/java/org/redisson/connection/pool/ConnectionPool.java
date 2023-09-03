@@ -65,46 +65,24 @@ abstract class ConnectionPool<T extends RedisConnection> {
         this.connectionManager = connectionManager;
     }
 
-    public CompletableFuture<Void> add(ClientConnectionsEntry entry) {
-        return initConnections(entry, true);
-    }
-
     public void addEntry(ClientConnectionsEntry entry) {
         entries.add(entry);
     }
 
     public CompletableFuture<Void> initConnections(ClientConnectionsEntry entry) {
-        return initConnections(entry, false);
-    }
-    
-    private CompletableFuture<Void> initConnections(ClientConnectionsEntry entry, boolean checkFreezed) {
         int minimumIdleSize = getMinimumIdleSize(entry);
-
-        if (minimumIdleSize == 0 || (checkFreezed && entry.isFreezed())) {
+        if (minimumIdleSize == 0) {
             return CompletableFuture.completedFuture(null);
         }
 
         CompletableFuture<Void> initPromise = new CompletableFuture<>();
         AtomicInteger initializedConnections = new AtomicInteger(minimumIdleSize);
-        int startAmount = Math.min(1, minimumIdleSize);
-        AtomicInteger requests = new AtomicInteger(startAmount);
-        for (int i = 0; i < startAmount; i++) {
-            createConnection(checkFreezed, requests, entry, initPromise, minimumIdleSize, initializedConnections);
-        }
+        createConnection(entry, initPromise, minimumIdleSize, initializedConnections);
         return initPromise;
     }
 
-    private void createConnection(boolean checkFreezed, AtomicInteger requests, ClientConnectionsEntry entry,
+    private void createConnection(ClientConnectionsEntry entry,
                                   CompletableFuture<Void> initPromise, int minimumIdleSize, AtomicInteger initializedConnections) {
-
-        if (checkFreezed && (entry.isFreezed() || !isHealthy(entry))) {
-            int totalInitializedConnections = minimumIdleSize - initializedConnections.get();
-            Throwable cause = new RedisConnectionException(
-                    "Unable to init enough connections amount! Only " + totalInitializedConnections + " of " + minimumIdleSize + " were initialized. Server: "
-                                        + entry.getClient().getAddr());
-            initPromise.completeExceptionally(cause);
-            return;
-        }
 
         CompletableFuture<Void> f = acquireConnection(entry, null);
         f.thenAccept(r -> {
@@ -151,7 +129,7 @@ abstract class ConnectionPool<T extends RedisConnection> {
                         errorMsg = "Unable to init enough connections amount! Only " + totalInitializedConnections
                                 + " of " + minimumIdleSize + " were initialized. Redis server: " + entry.getClient().getAddr();
                     }
-                    Throwable cause = new RedisConnectionException(errorMsg, e);
+                    Exception cause = new RedisConnectionException(errorMsg, e);
                     initPromise.completeExceptionally(cause);
                     return;
                 }
@@ -162,9 +140,7 @@ abstract class ConnectionPool<T extends RedisConnection> {
                         log.info("{} connections initialized for {}", minimumIdleSize, entry.getClient().getAddr());
                     }
                 } else if (value > 0 && !initPromise.isDone()) {
-                    if (requests.incrementAndGet() <= minimumIdleSize) {
-                        createConnection(checkFreezed, requests, entry, initPromise, minimumIdleSize, initializedConnections);
-                    }
+                    createConnection(entry, initPromise, minimumIdleSize, initializedConnections);
                 }
             });
         });
@@ -385,9 +361,12 @@ abstract class ConnectionPool<T extends RedisConnection> {
                             }
 
                             if ("PONG".equals(t)) {
-                                if (masterSlaveEntry.slaveUp(entry, FreezeReason.RECONNECT)) {
-                                    log.info("slave {} has been successfully reconnected", entry.getClient().getAddr());
-                                }
+                                CompletableFuture<Boolean> ff = masterSlaveEntry.slaveUpAsync(entry, FreezeReason.RECONNECT);
+                                ff.thenAccept(r -> {
+                                    if (r) {
+                                        log.info("slave {} has been successfully reconnected", entry.getClient().getAddr());
+                                    }
+                                });
                             } else {
                                 scheduleCheck(entry);
                             }

@@ -75,7 +75,7 @@ public class RedisQueuedBatchExecutor<V, R> extends BaseRedisBatchExecutor<V, R>
 
             Codec codecToUse = getCodec(codec);
             BatchCommandData<V, R> commandData = new BatchCommandData<>(mainPromise, codecToUse, command, null, index.incrementAndGet());
-            entry.getCommands().add(commandData);
+            entry.addCommand(commandData);
         } else {
             addBatchCommandData(null);
         }
@@ -123,9 +123,12 @@ public class RedisQueuedBatchExecutor<V, R> extends BaseRedisBatchExecutor<V, R>
             sentPromise.completeExceptionally(cause);
             mainPromise.completeExceptionally(cause);
             if (executed.compareAndSet(false, true)) {
-                getNow(connectionFuture).forceFastReconnectAsync().whenComplete((res, e) -> {
-                    RedisQueuedBatchExecutor.super.releaseConnection(mainPromise, connectionFuture);
-                });
+                RedisConnection c = getNow(connectionFuture);
+                if (c != null) {
+                    c.forceFastReconnectAsync().whenComplete((res, e) -> {
+                        RedisQueuedBatchExecutor.super.releaseConnection(mainPromise, connectionFuture);
+                    });
+                }
             }
             return;
         }
@@ -180,10 +183,16 @@ public class RedisQueuedBatchExecutor<V, R> extends BaseRedisBatchExecutor<V, R>
                         list.add(new CommandData<>(new CompletableFuture<>(), codec, RedisCommands.CLIENT_REPLY, new Object[]{"ON"}));
                     }
                     if (options.getSyncSlaves() > 0) {
-                        BatchCommandData<?, ?> waitCommand = new BatchCommandData<>(RedisCommands.WAIT,
-                                new Object[] { this.options.getSyncSlaves(), this.options.getSyncTimeout() }, index.incrementAndGet());
+                        BatchCommandData<?, ?> waitCommand;
+                        if (options.isSyncAOF()) {
+                            waitCommand = new BatchCommandData<>(RedisCommands.WAITAOF,
+                                    new Object[]{this.options.getSyncLocals(), this.options.getSyncSlaves(), this.options.getSyncTimeout()}, index.incrementAndGet());
+                        } else {
+                            waitCommand = new BatchCommandData<>(RedisCommands.WAIT,
+                                    new Object[] { this.options.getSyncSlaves(), this.options.getSyncTimeout() }, index.incrementAndGet());
+                        }
                         list.add(waitCommand);
-                        entry.getCommands().add(waitCommand);
+                        entry.add(waitCommand);
                     }
 
                     CompletableFuture<Void> main = new CompletableFuture<>();
@@ -198,38 +207,37 @@ public class RedisQueuedBatchExecutor<V, R> extends BaseRedisBatchExecutor<V, R>
             }
         }
     }
-    
+
     @Override
     protected CompletableFuture<RedisConnection> getConnection() {
         MasterSlaveEntry msEntry = getEntry();
-        ConnectionEntry entry = connections.computeIfAbsent(msEntry, k -> new ConnectionEntry());
-
-        if (entry.getConnectionFuture() != null) {
-            connectionFuture = entry.getConnectionFuture();
-            return connectionFuture;
-        }
-        
-        synchronized (this) {
-            if (entry.getConnectionFuture() != null) {
-                connectionFuture = entry.getConnectionFuture();
-                return connectionFuture;
-            }
-
+        ConnectionEntry entry = connections.computeIfAbsent(msEntry, k -> {
             if (this.options.getExecutionMode() == ExecutionMode.REDIS_WRITE_ATOMIC) {
                 connectionFuture = connectionWriteOp(null);
             } else {
                 connectionFuture = connectionReadOp(null);
             }
-            connectionFuture.toCompletableFuture().join();
-            entry.setConnectionFuture(connectionFuture);
 
-            entry.setCancelCallback(() -> {
+            ConnectionEntry ce = new ConnectionEntry(connectionFuture);
+            ce.setCancelCallback(() -> {
                 handleError(connectionFuture, new CancellationException());
             });
+            return ce;
+        });
 
-            return connectionFuture;
-        }
+        return entry.getConnectionFuture();
     }
 
+    private MasterSlaveEntry getEntry() {
+        if (source.getSlot() != null) {
+            entry = connectionManager.getWriteEntry(source.getSlot());
+            if (entry == null) {
+                throw connectionManager.getServiceManager().createNodeNotFoundException(source);
+            }
+            return entry;
+        }
+        entry = source.getEntry();
+        return entry;
+    }
 
 }

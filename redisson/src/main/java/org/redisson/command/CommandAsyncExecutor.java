@@ -30,7 +30,9 @@ import org.redisson.liveobject.core.RedissonObjectBuilder;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Supplier;
 
 /**
  *
@@ -47,7 +49,7 @@ public interface CommandAsyncExecutor {
 
     RedisException convertException(ExecutionException e);
 
-    <V> void transfer(CompletableFuture<V> future1, CompletableFuture<V> future2);
+    <V> void transfer(CompletionStage<V> future1, CompletableFuture<V> future2);
 
     <V> V getNow(CompletableFuture<V> future);
 
@@ -72,6 +74,8 @@ public interface CommandAsyncExecutor {
     <T, R> RFuture<R> readAsync(RedisClient client, byte[] key, Codec codec, RedisCommand<T> command, Object... params);
     
     <T, R> RFuture<R> readAsync(RedisClient client, Codec codec, RedisCommand<T> command, Object... params);
+
+    <R> List<CompletableFuture<R>> executeAllAsync(MasterSlaveEntry entry, RedisCommand<?> command, Object... params);
 
     <R> List<CompletableFuture<R>> executeAllAsync(RedisCommand<?> command, Object... params);
 
@@ -129,5 +133,11 @@ public interface CommandAsyncExecutor {
     boolean isEvalShaROSupported();
 
     void setEvalShaROSupported(boolean value);
+
+    <T> RFuture<T> syncedEvalWithRetry(String key, Codec codec, RedisCommand<T> evalCommandType, String script, List<Object> keys, Object... params);
+
+    <T> RFuture<T> syncedEval(String key, Codec codec, RedisCommand<T> evalCommandType, String script, List<Object> keys, Object... params);
+
+    <T> CompletionStage<T> handleNoSync(CompletionStage<T> stage, Supplier<CompletionStage<?>> supplier);
 
 }

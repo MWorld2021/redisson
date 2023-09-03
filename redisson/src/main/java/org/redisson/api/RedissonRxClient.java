@@ -79,7 +79,21 @@ public interface RedissonRxClient {
      * @return RStream object
      */
     <K, V> RStreamRx<K, V> getStream(String name, Codec codec);
-    
+
+    /**
+     * Returns API for RediSearch module
+     *
+     * @return RSearch object
+     */
+    RSearchRx getSearch();
+
+    /**
+     * Returns API for RediSearch module using defined codec for attribute values.
+     *
+     * @return RSearch object
+     */
+    RSearchRx getSearch(Codec codec);
+
     /**
      * Returns geospatial items holder instance by <code>name</code>.
      * 
@@ -283,7 +297,7 @@ public interface RedissonRxClient {
      * @param options - map options
      * @return MapCache object
      */
-    <K, V> RMapCacheRx<K, V> getMapCache(String name, Codec codec, MapOptions<K, V> options);
+    <K, V> RMapCacheRx<K, V> getMapCache(String name, Codec codec, MapCacheOptions<K, V> options);
 
     /**
      * Returns map-based cache instance by name.
@@ -310,7 +324,7 @@ public interface RedissonRxClient {
      * @param options - map options
      * @return MapCache object
      */
-    <K, V> RMapCacheRx<K, V> getMapCache(String name, MapOptions<K, V> options);
+    <K, V> RMapCacheRx<K, V> getMapCache(String name, MapCacheOptions<K, V> options);
     
     /**
      * Returns object holder instance by name

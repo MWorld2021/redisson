@@ -21,8 +21,7 @@ import io.netty.resolver.AddressResolver;
 import io.netty.resolver.AddressResolverGroup;
 import io.netty.resolver.InetSocketAddressResolver;
 import io.netty.resolver.NameResolver;
-import io.netty.resolver.dns.DnsAddressResolverGroup;
-import io.netty.resolver.dns.DnsServerAddressStreamProvider;
+import io.netty.resolver.dns.*;
 import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.Promise;
 import org.redisson.misc.AsyncSemaphore;
@@ -82,7 +81,7 @@ public class SequentialDnsAddressResolverFactory implements AddressResolverGroup
     private final AsyncSemaphore asyncSemaphore;
 
     public SequentialDnsAddressResolverFactory() {
-        this(8);
+        this(6);
     }
 
     public SequentialDnsAddressResolverFactory(int concurrencyLevel) {
@@ -91,7 +90,13 @@ public class SequentialDnsAddressResolverFactory implements AddressResolverGroup
 
     @Override
     public AddressResolverGroup<InetSocketAddress> create(Class<? extends DatagramChannel> channelType, DnsServerAddressStreamProvider nameServerProvider) {
-        DnsAddressResolverGroup group = new DnsAddressResolverGroup(channelType, nameServerProvider) {
+        DnsNameResolverBuilder dnsResolverBuilder = new DnsNameResolverBuilder();
+        dnsResolverBuilder.channelType(channelType)
+                        .nameServerProvider(nameServerProvider)
+                        .resolveCache(new DefaultDnsCache(0, Integer.MAX_VALUE, 0))
+                        .cnameCache(new DefaultDnsCnameCache(0, Integer.MAX_VALUE));
+
+        DnsAddressResolverGroup group = new DnsAddressResolverGroup(dnsResolverBuilder) {
             @Override
             protected AddressResolver<InetSocketAddress> newAddressResolver(EventLoop eventLoop, NameResolver<InetAddress> resolver) throws Exception {
                 return new LimitedInetSocketAddressResolver(asyncSemaphore, eventLoop, resolver);

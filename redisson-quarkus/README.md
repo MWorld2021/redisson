@@ -42,7 +42,9 @@ Maven
     <artifactId>redisson-quarkus-16</artifactId>
     <!-- for Quarkus v2.x.x -->
     <artifactId>redisson-quarkus-20</artifactId>
-    <version>3.20.1</version>
+    <!-- for Quarkus v3.x.x -->
+    <artifactId>redisson-quarkus-30</artifactId>
+    <version>3.23.4</version>
 </dependency>
 ```
 
@@ -50,9 +52,11 @@ Gradle
 
 ```groovy
 // for Quarkus v1.6.x - v1.13.x
-compile 'org.redisson:redisson-quarkus-16:3.20.1'
+compile 'org.redisson:redisson-quarkus-16:3.23.4'
 // for Quarkus v2.x.x
-compile 'org.redisson:redisson-quarkus-20:3.20.1'
+compile 'org.redisson:redisson-quarkus-20:3.23.4'
+// for Quarkus v3.x.x
+compile 'org.redisson:redisson-quarkus-30:3.23.4'
 ```
 
 ### 2. Add settings into `application.properties` file
@@ -74,7 +78,7 @@ quarkus.redisson.threads=16
 quarkus.redisson.netty-threads=32
 ```
 
-Use `quarkus.redisson.file` setting to specify path to config file.    
+Use `quarkus.redisson.file` setting to specify path to a config file.    
     
 ### 3. Use Redisson
 

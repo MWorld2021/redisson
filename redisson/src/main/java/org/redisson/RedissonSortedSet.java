@@ -34,8 +34,6 @@ import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
-import static org.redisson.client.protocol.RedisCommands.EVAL_LIST_SCAN;
-
 /**
  *
  * @author Nikita Koksharov
@@ -73,8 +71,6 @@ public class RedissonSortedSet<V> extends RedissonObject implements RSortedSet<V
 
     private Comparator comparator = Comparator.naturalOrder();
 
-    CommandAsyncExecutor commandExecutor;
-    
     private RLock lock;
     private RedissonList<V> list;
     private RBucket<String> comparatorHolder;
@@ -82,7 +78,6 @@ public class RedissonSortedSet<V> extends RedissonObject implements RSortedSet<V
 
     protected RedissonSortedSet(CommandAsyncExecutor commandExecutor, String name, RedissonClient redisson) {
         super(commandExecutor, name);
-        this.commandExecutor = commandExecutor;
         this.redisson = redisson;
 
         comparatorHolder = redisson.getBucket(getComparatorKeyName(), StringCodec.INSTANCE);
@@ -92,7 +87,6 @@ public class RedissonSortedSet<V> extends RedissonObject implements RSortedSet<V
 
     public RedissonSortedSet(Codec codec, CommandAsyncExecutor commandExecutor, String name, Redisson redisson) {
         super(codec, commandExecutor, name);
-        this.commandExecutor = commandExecutor;
 
         comparatorHolder = redisson.getBucket(getComparatorKeyName(), StringCodec.INSTANCE);
         lock = redisson.getLock("redisson_sortedset_lock:{" + getRawName() + "}");
@@ -420,7 +414,7 @@ public class RedissonSortedSet<V> extends RedissonObject implements RSortedSet<V
     }
 
     private RFuture<ScanResult<Object>> distributedScanIteratorAsync(String iteratorName, int count) {
-        return commandExecutor.evalWriteAsync(getRawName(), codec, EVAL_LIST_SCAN,
+        return commandExecutor.evalWriteAsync(getRawName(), codec, RedisCommands.EVAL_SCAN,
                 "local start_index = redis.call('get', KEYS[2]); "
                 + "if start_index ~= false then "
                     + "start_index = tonumber(start_index); "

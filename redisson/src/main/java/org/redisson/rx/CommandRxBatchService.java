@@ -26,9 +26,11 @@ import org.redisson.command.CommandBatchService;
 import org.redisson.connection.ConnectionManager;
 import org.redisson.connection.NodeSource;
 import org.redisson.liveobject.core.RedissonObjectBuilder;
+import org.redisson.misc.CompletableFutureWrapper;
 
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 
@@ -45,19 +47,16 @@ public class CommandRxBatchService extends CommandRxService {
     }
     
     @Override
-    public <R> Flowable<R> flowable(Callable<CompletableFuture<R>> supplier) {
-        Flowable<R> flowable = super.flowable(new Callable<CompletableFuture<R>>() {
-            volatile CompletableFuture<R> future;
+    public <R> Flowable<R> flowable(Callable<RFuture<R>> supplier) {
+        Flowable<R> flowable = super.flowable(new Callable<RFuture<R>>() {
+            final CompletableFuture<R> future = new CompletableFuture<>();
+            final AtomicBoolean lock = new AtomicBoolean();
             @Override
-            public CompletableFuture<R> call() throws Exception {
-                if (future == null) {
-                    synchronized (this) {
-                        if (future == null) {
-                            future = supplier.call();
-                        }
-                    }
+            public RFuture<R> call() throws Exception {
+                if (lock.compareAndSet(false, true)) {
+                    transfer(supplier.call().toCompletableFuture(), future);
                 }
-                return future;
+                return new CompletableFutureWrapper<>(future);
             }
         });
         flowable.subscribe();
@@ -75,11 +74,11 @@ public class CommandRxBatchService extends CommandRxService {
         return batchService.async(readOnlyMode, nodeSource, codec, command, params, ignoreRedirect, noRetry);
     }
 
-    public CompletableFuture<BatchResult<?>> executeAsync() {
-        return batchService.executeAsync().toCompletableFuture();
+    public RFuture<BatchResult<?>> executeAsync() {
+        return batchService.executeAsync();
     }
 
-    public CompletableFuture<Void> discardAsync() {
-        return batchService.discardAsync().toCompletableFuture();
+    public RFuture<Void> discardAsync() {
+        return batchService.discardAsync();
     }
 }

@@ -109,7 +109,7 @@ public class RedissonFairLock extends RedissonLock implements RLock {
 
         long currentTime = System.currentTimeMillis();
         if (command == RedisCommands.EVAL_NULL_BOOLEAN) {
-            return evalWriteAsync(getRawName(), LongCodec.INSTANCE, command,
+            return commandExecutor.syncedEval(getRawName(), LongCodec.INSTANCE, command,
                     // remove stale threads
                     "while true do " +
                         "local firstThreadId2 = redis.call('lindex', KEYS[2], 0);" +
@@ -154,7 +154,7 @@ public class RedissonFairLock extends RedissonLock implements RLock {
         }
 
         if (command == RedisCommands.EVAL_LONG) {
-            return evalWriteAsync(getRawName(), LongCodec.INSTANCE, command,
+            return commandExecutor.syncedEval(getRawName(), LongCodec.INSTANCE, command,
                     // remove stale threads
                     "while true do " +
                         "local firstThreadId2 = redis.call('lindex', KEYS[2], 0);" +
@@ -254,7 +254,7 @@ public class RedissonFairLock extends RedissonLock implements RLock {
               + "if (redis.call('exists', KEYS[1]) == 0) then " + 
                     "local nextThreadId = redis.call('lindex', KEYS[2], 0); " + 
                     "if nextThreadId ~= false then " +
-                        "redis.call('publish', KEYS[4] .. ':' .. nextThreadId, ARGV[1]); " +
+                        "redis.call(ARGV[5], KEYS[4] .. ':' .. nextThreadId, ARGV[1]); " +
                     "end; " +
                     "return 1; " +
                 "end;" +
@@ -270,11 +270,12 @@ public class RedissonFairLock extends RedissonLock implements RLock {
                 "redis.call('del', KEYS[1]); " +
                 "local nextThreadId = redis.call('lindex', KEYS[2], 0); " + 
                 "if nextThreadId ~= false then " +
-                    "redis.call('publish', KEYS[4] .. ':' .. nextThreadId, ARGV[1]); " +
+                    "redis.call(ARGV[5], KEYS[4] .. ':' .. nextThreadId, ARGV[1]); " +
                 "end; " +
                 "return 1; ",
                 Arrays.asList(getRawName(), threadsQueueName, timeoutSetName, getChannelName()),
-                LockPubSub.UNLOCK_MESSAGE, internalLockLeaseTime, getLockName(threadId), System.currentTimeMillis());
+                    LockPubSub.UNLOCK_MESSAGE, internalLockLeaseTime, getLockName(threadId),
+                    System.currentTimeMillis(), getSubscribeService().getPublishCommand());
     }
 
     @Override
@@ -312,7 +313,7 @@ public class RedissonFairLock extends RedissonLock implements RLock {
     @Override
     public RFuture<Boolean> forceUnlockAsync() {
         cancelExpirationRenewal(null);
-        return evalWriteAsync(getRawName(), LongCodec.INSTANCE, RedisCommands.EVAL_BOOLEAN,
+        return commandExecutor.syncedEvalWithRetry(getRawName(), LongCodec.INSTANCE, RedisCommands.EVAL_BOOLEAN,
                 // remove stale threads
                 "while true do "
                 + "local firstThreadId2 = redis.call('lindex', KEYS[2], 0);"
@@ -332,13 +333,14 @@ public class RedissonFairLock extends RedissonLock implements RLock {
                 "if (redis.call('del', KEYS[1]) == 1) then " + 
                     "local nextThreadId = redis.call('lindex', KEYS[2], 0); " + 
                     "if nextThreadId ~= false then " +
-                        "redis.call('publish', KEYS[4] .. ':' .. nextThreadId, ARGV[1]); " +
+                        "redis.call(ARGV[3], KEYS[4] .. ':' .. nextThreadId, ARGV[1]); " +
                     "end; " + 
                     "return 1; " + 
                 "end; " + 
                 "return 0;",
                 Arrays.asList(getRawName(), threadsQueueName, timeoutSetName, getChannelName()),
-                LockPubSub.UNLOCK_MESSAGE, System.currentTimeMillis());
+                LockPubSub.UNLOCK_MESSAGE, System.currentTimeMillis(),
+                getSubscribeService().getPublishCommand());
     }
 
 }

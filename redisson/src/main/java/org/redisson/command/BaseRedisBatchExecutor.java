@@ -21,7 +21,6 @@ import org.redisson.client.protocol.BatchCommandData;
 import org.redisson.client.protocol.RedisCommand;
 import org.redisson.command.CommandBatchService.Entry;
 import org.redisson.connection.ConnectionManager;
-import org.redisson.connection.MasterSlaveEntry;
 import org.redisson.connection.NodeSource;
 import org.redisson.liveobject.core.RedissonObjectBuilder;
 
@@ -60,7 +59,7 @@ public class BaseRedisBatchExecutor<V, R> extends RedisExecutor<V, R> {
         this.index = index;
         this.executed = executed;
 
-        if (options.getRetryAttempts() > 0) {
+        if (options.getRetryAttempts() >= 0) {
             this.attempts = options.getRetryAttempts();
         }
         if (options.getRetryInterval() > 0) {
@@ -74,18 +73,6 @@ public class BaseRedisBatchExecutor<V, R> extends RedisExecutor<V, R> {
         }
     }
 
-    protected final MasterSlaveEntry getEntry() {
-        if (source.getSlot() != null) {
-            entry = connectionManager.getWriteEntry(source.getSlot());
-            if (entry == null) {
-                throw connectionManager.getServiceManager().createNodeNotFoundException(source);
-            }
-            return entry;
-        }
-        entry = source.getEntry();
-        return entry;
-    }
-    
     protected final void addBatchCommandData(Object[] batchParams) {
         Entry entry = commands.computeIfAbsent(source, k -> new Entry());
 
@@ -95,7 +82,7 @@ public class BaseRedisBatchExecutor<V, R> extends RedisExecutor<V, R> {
 
         Codec codecToUse = getCodec(codec);
         BatchCommandData<V, R> commandData = new BatchCommandData<>(mainPromise, codecToUse, command, batchParams, index.incrementAndGet());
-        entry.getCommands().add(commandData);
+        entry.addCommand(commandData);
     }
         
 }

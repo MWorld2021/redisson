@@ -162,13 +162,20 @@ public class PubSubConnectionEntry {
 
     public void subscribe(Codec codec, PubSubType type, ChannelName channelName, CompletableFuture<Void> subscribeFuture) {
         ChannelFuture future;
+        CompletableFuture<Void> promise = new CompletableFuture<>();
         if (PubSubType.SUBSCRIBE == type) {
-            future = conn.subscribe(codec, channelName);
+            future = conn.subscribe(promise, codec, channelName);
         } else if (PubSubType.SSUBSCRIBE == type) {
-            future = conn.ssubscribe(codec, channelName);
+            future = conn.ssubscribe(promise, codec, channelName);
         } else {
-            future = conn.psubscribe(codec, channelName);
+            future = conn.psubscribe(promise, codec, channelName);
         }
+
+        promise.whenComplete((r, ex) -> {
+            if (ex != null) {
+                subscribeFuture.completeExceptionally(ex);
+            }
+        });
 
         future.addListener((ChannelFutureListener) future1 -> {
             if (!future1.isSuccess()) {
@@ -202,7 +209,7 @@ public class PubSubConnectionEntry {
         AtomicBoolean executed = new AtomicBoolean();
         conn.addListener(new BaseRedisPubSubListener() {
             @Override
-            public boolean onStatus(PubSubType type, CharSequence ch) {
+            public void onStatus(PubSubType type, CharSequence ch) {
                 if (type == commandType && channel.equals(ch)) {
                     executed.set(true);
 
@@ -211,9 +218,7 @@ public class PubSubConnectionEntry {
                     if (listener != null) {
                         listener.onStatus(type, ch);
                     }
-                    return true;
                 }
-                return false;
             }
         });
 
@@ -253,11 +258,6 @@ public class PubSubConnectionEntry {
 
     @Override
     public String toString() {
-        return "PubSubConnectionEntry{" +
-                "subscribedChannelsAmount=" + subscribedChannelsAmount +
-                ", conn=" + conn +
-                ", subscribeChannelListeners=" + subscribeChannelListeners +
-                ", channelListeners=" + channelListeners +
-                '}';
+        return "PubSubConnectionEntry [subscribedChannelsAmount=" + subscribedChannelsAmount + ", conn=" + conn + "]";
     }
 }

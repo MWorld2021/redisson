@@ -1,25 +1,20 @@
 package org.redisson;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
-import java.io.Serializable;
-import java.time.Duration;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-
 import org.joor.Reflect;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RSetCache;
 import org.redisson.client.codec.IntegerCodec;
 import org.redisson.eviction.EvictionScheduler;
+
+import java.io.Serializable;
+import java.time.Duration;
+import java.util.*;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+
+import static org.assertj.core.api.Assertions.as;
+import static org.assertj.core.api.Assertions.assertThat;
 
 public class RedissonSetCacheTest extends BaseTest {
 
@@ -35,6 +30,53 @@ public class RedissonSetCacheTest extends BaseTest {
             this.lng = lng;
         }
 
+    }
+
+    @Test
+    public void testAddIfExists() throws InterruptedException {
+        RSetCache<String> cache = redisson.getSetCache("list");
+        cache.add("a", 1, TimeUnit.SECONDS);
+        assertThat(cache.addIfExists(Duration.ofSeconds(2), "a")).isTrue();
+
+        Thread.sleep(1500);
+        assertThat(cache.contains("a")).isTrue();
+        Thread.sleep(700);
+        assertThat(cache.contains("a")).isFalse();
+    }
+
+    @Test
+    public void testAddAll() {
+        RSetCache<String> cache = redisson.getSetCache("list");
+        cache.add("a", 1, TimeUnit.SECONDS);
+        Map<String, Duration> map = new HashMap<>();
+        map.put("a", Duration.ofSeconds(2));
+        map.put("b", Duration.ofSeconds(2));
+        map.put("c", Duration.ofSeconds(2));
+        assertThat(cache.addAll(map)).isEqualTo(2);
+        assertThat(cache.size()).isEqualTo(3);
+    }
+
+    @Test
+    public void testAddAllIfExists() throws InterruptedException {
+        RSetCache<String> cache = redisson.getSetCache("list");
+        Map<String, Duration> map = new HashMap<>();
+        map.put("a", Duration.ofSeconds(2));
+        map.put("b", Duration.ofSeconds(2));
+        map.put("c", Duration.ofSeconds(2));
+        assertThat(cache.addAllIfExist(map)).isZero();
+        assertThat(cache.size()).isZero();
+
+        cache.add("a", 1, TimeUnit.SECONDS);
+        cache.add("b", 1, TimeUnit.SECONDS);
+        assertThat(cache.addAllIfExist(map)).isEqualTo(2);
+        assertThat(cache.contains("c")).isFalse();
+
+        Thread.sleep(1500);
+        assertThat(cache.contains("a")).isTrue();
+        assertThat(cache.contains("b")).isTrue();
+        Thread.sleep(700);
+        assertThat(cache.contains("a")).isFalse();
+        assertThat(cache.contains("b")).isFalse();
     }
 
     @Test
@@ -513,7 +555,97 @@ public class RedissonSetCacheTest extends BaseTest {
 
         Assertions.assertEquals(0, cache.size());
         cache.destroy();
-
     }
+
+    @Test
+    public void testUnion() throws InterruptedException {
+        redisson.getKeys().flushall();
+        RSetCache<Integer> cache1 = redisson.getSetCache("cache1", IntegerCodec.INSTANCE);
+        cache1.add(1);
+        cache1.add(2, 1, TimeUnit.SECONDS);
+        cache1.add(5, 1, TimeUnit.SECONDS);
+        cache1.add(3);
+
+        RSetCache<Integer> cache2 = redisson.getSetCache("cache2", IntegerCodec.INSTANCE);
+        cache2.add(4);
+        cache2.add(2, 1, TimeUnit.SECONDS);
+        cache2.add(5, 1, TimeUnit.SECONDS);
+        cache2.add(7);
+
+
+        RSetCache<Integer> cache3 = redisson.getSetCache("cache3", IntegerCodec.INSTANCE);
+        assertThat(cache3.union("cache1", "cache2")).isEqualTo(6);
+        assertThat(cache3).containsExactlyInAnyOrder(1, 3, 2, 5, 4, 7);
+        cache3.clear();
+
+        Thread.sleep(1500);
+
+        assertThat(cache3.union("cache1", "cache2")).isEqualTo(4);
+        assertThat(cache3).containsExactlyInAnyOrder(1, 3, 4, 7);
+
+        assertThat(redisson.getKeys().getKeys()).containsExactlyInAnyOrder("cache1", "cache2", "cache3");
+    }
+
+    @Test
+    public void testDiff() throws InterruptedException {
+        redisson.getKeys().flushall();
+        RSetCache<Integer> cache1 = redisson.getSetCache("cache1", IntegerCodec.INSTANCE);
+        cache1.add(1);
+        cache1.add(2, 1, TimeUnit.SECONDS);
+        cache1.add(5, 1, TimeUnit.SECONDS);
+        cache1.add(3, 1, TimeUnit.SECONDS);
+
+        RSetCache<Integer> cache2 = redisson.getSetCache("cache2", IntegerCodec.INSTANCE);
+        cache2.add(4);
+        cache2.add(2, 1, TimeUnit.SECONDS);
+        cache2.add(5, 1, TimeUnit.SECONDS);
+        cache2.add(7);
+
+
+        RSetCache<Integer> cache3 = redisson.getSetCache("cache3", IntegerCodec.INSTANCE);
+        assertThat(cache3.diff("cache1", "cache2")).isEqualTo(2);
+        assertThat(cache3).containsExactlyInAnyOrder(1, 3);
+        cache3.clear();
+
+        Thread.sleep(1500);
+
+        assertThat(cache3.diff("cache1", "cache2")).isEqualTo(1);
+        assertThat(cache3).containsExactlyInAnyOrder(1);
+
+        assertThat(redisson.getKeys().getKeys()).containsExactlyInAnyOrder("cache1", "cache2", "cache3");
+    }
+
+        @Test
+    public void testIntersection() throws InterruptedException {
+        redisson.getKeys().flushall();
+        RSetCache<Integer> cache1 = redisson.getSetCache("cache1");
+        cache1.add(1);
+        cache1.add(2, 1, TimeUnit.SECONDS);
+        cache1.add(5, 1, TimeUnit.SECONDS);
+        cache1.add(3);
+
+        RSetCache<Integer> cache2 = redisson.getSetCache("cache2");
+        cache2.add(4);
+        cache2.add(2, 1, TimeUnit.SECONDS);
+        cache2.add(5, 1, TimeUnit.SECONDS);
+        cache2.add(7);
+
+
+        assertThat(cache1.countIntersection("cache2")).isEqualTo(2);
+        RSetCache<Integer> cache3 = redisson.getSetCache("cache3");
+        assertThat(cache3.intersection("cache1", "cache2")).isEqualTo(2);
+        assertThat(cache3).containsExactlyInAnyOrder(2, 5);
+        cache3.clear();
+
+        Thread.sleep(1500);
+
+        assertThat(cache1.countIntersection("cache2")).isEqualTo(0);
+        assertThat(cache3.intersection("cache1", "cache2")).isEqualTo(0);
+        assertThat(cache3).isEmpty();
+
+        assertThat(redisson.getKeys().count()).isEqualTo(2);
+        assertThat(redisson.getKeys().getKeys()).containsExactlyInAnyOrder("cache1", "cache2");
+    }
+
 
 }

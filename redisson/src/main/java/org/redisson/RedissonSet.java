@@ -16,6 +16,7 @@
 package org.redisson;
 
 import org.redisson.api.*;
+import org.redisson.api.listener.*;
 import org.redisson.api.mapreduce.RCollectionMapReduce;
 import org.redisson.client.RedisClient;
 import org.redisson.client.codec.Codec;
@@ -152,7 +153,7 @@ public class RedissonSet<V> extends RedissonExpirable implements RSet<V>, ScanIt
         }
         args.add(count);
 
-        return commandExecutor.evalWriteAsync(getRawName(), codec, RedisCommands.EVAL_SSCAN,
+        return commandExecutor.evalWriteAsync(getRawName(), codec, RedisCommands.EVAL_SCAN,
                 "local cursor = redis.call('get', KEYS[2]); "
                 + "if cursor ~= false then "
                     + "cursor = tonumber(cursor); "
@@ -866,4 +867,34 @@ public class RedissonSet<V> extends RedissonExpirable implements RSet<V>, ScanIt
     public Stream<V> stream(String pattern) {
         return toStream(iterator(pattern));
     }
+
+    @Override
+    public int addListener(ObjectListener listener) {
+        if (listener instanceof SetAddListener) {
+            return addListener("__keyevent@*:sadd", (SetAddListener) listener, SetAddListener::onAdd);
+        }
+        if (listener instanceof SetRemoveListener) {
+            return addListener("__keyevent@*:srem", (SetRemoveListener) listener, SetRemoveListener::onRemove);
+        }
+        if (listener instanceof SetRemoveRandomListener) {
+            return addListener("__keyevent@*:spop", (SetRemoveRandomListener) listener, SetRemoveRandomListener::onRandomRemove);
+        }
+        return super.addListener(listener);
+    }
+
+    @Override
+    public RFuture<Integer> addListenerAsync(ObjectListener listener) {
+        if (listener instanceof SetAddListener) {
+            return addListenerAsync("__keyevent@*:sadd", (SetAddListener) listener, SetAddListener::onAdd);
+        }
+        if (listener instanceof SetRemoveListener) {
+            return addListenerAsync("__keyevent@*:srem", (SetRemoveListener) listener, SetRemoveListener::onRemove);
+        }
+        if (listener instanceof SetRemoveRandomListener) {
+            return addListenerAsync("__keyevent@*:spop", (SetRemoveRandomListener) listener, SetRemoveRandomListener::onRandomRemove);
+        }
+        return super.addListenerAsync(listener);
+    }
+
+
 }

@@ -11,6 +11,7 @@ import org.redisson.api.LocalCachedMapOptions.EvictionPolicy;
 import org.redisson.api.LocalCachedMapOptions.ReconnectionStrategy;
 import org.redisson.api.LocalCachedMapOptions.SyncStrategy;
 import org.redisson.api.MapOptions.WriteMode;
+import org.redisson.api.listener.LocalCacheInvalidateListener;
 import org.redisson.api.map.MapLoader;
 import org.redisson.client.RedisClient;
 import org.redisson.client.RedisClientConfig;
@@ -25,6 +26,8 @@ import org.redisson.codec.JsonJacksonCodec;
 import org.redisson.codec.TypedJsonJacksonCodec;
 import org.redisson.config.Config;
 
+import java.io.IOException;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 
@@ -125,6 +128,50 @@ public class RedissonLocalCachedMapTest extends BaseMapTest {
     }
 
     @Test
+    public void testListeners() throws InterruptedException {
+        RLocalCachedMap<String, String> map = redisson.getLocalCachedMap("test", LocalCachedMapOptions.defaults());
+        Map<String, String> entries = new HashMap();
+        map.addListener((LocalCacheInvalidateListener<String, String>) (key, value) -> {
+            entries.put(key, value);
+        });
+        map.put("v1", "v2");
+        map.put("v3", "v4");
+
+        Thread.sleep(100);
+
+        assertThat(entries.keySet()).containsOnly("v1", "v3");
+        assertThat(entries.values()).containsOnly(null, null);
+    }
+
+    @Test
+    public void testExpiration() throws IOException, InterruptedException {
+        RedisRunner.RedisProcess instance = new RedisRunner()
+                .nosave()
+                .randomPort()
+                .randomDir()
+                .notifyKeyspaceEvents(
+                        RedisRunner.KEYSPACE_EVENTS_OPTIONS.E,
+                        RedisRunner.KEYSPACE_EVENTS_OPTIONS.K,
+                        RedisRunner.KEYSPACE_EVENTS_OPTIONS.x)
+                .run();
+
+        Config config = new Config();
+        config.useSingleServer().setAddress(instance.getRedisServerAddressAndPort());
+        RedissonClient redisson = Redisson.create(config);
+
+        RLocalCachedMap<String, String> m = redisson.getLocalCachedMap("test", LocalCachedMapOptions.defaults());
+        m.put("12", "32");
+        assertThat(m.cachedEntrySet()).hasSize(1);
+        m.expire(Duration.ofSeconds(1));
+        Thread.sleep(1500);
+        assertThat(m.cachedEntrySet()).hasSize(0);
+        assertThat(m.get("12")).isNull();
+
+        redisson.shutdown();
+        instance.stop();
+    }
+
+    @Test
     public void testMapLoaderGet() {
         Map<String, String> cache = new HashMap<>();
         cache.put("1", "11");
@@ -158,12 +205,12 @@ public class RedissonLocalCachedMapTest extends BaseMapTest {
 
     @Override
     protected <K, V> RMap<K, V> getMap(String name) {
-        return redisson.getLocalCachedMap(name, LocalCachedMapOptions.<K, V>defaults());
+        return redisson.getLocalCachedMap(name, LocalCachedMapOptions.defaults());
     }
     
     @Override
     protected <K, V> RMap<K, V> getMap(String name, Codec codec) {
-        return redisson.getLocalCachedMap(name, codec, LocalCachedMapOptions.<K, V>defaults());
+        return redisson.getLocalCachedMap(name, codec, LocalCachedMapOptions.defaults());
     }
     
     @Override
@@ -387,7 +434,7 @@ public class RedissonLocalCachedMapTest extends BaseMapTest {
         map2.put("2", 4);
         Thread.sleep(50);
 
-        assertThat(redisson.getKeys().getKeys()).containsOnly("test:suffix:");
+        assertThat(redisson.getKeys().getKeys()).containsOnly("test");
 
         RedisClientConfig destinationCfg = new RedisClientConfig();
         destinationCfg.setAddress(RedisRunner.getDefaultRedisServerBindAddressAndPort());
@@ -402,6 +449,19 @@ public class RedissonLocalCachedMapTest extends BaseMapTest {
         assertThat(cache2.size()).isEqualTo(1);
 
         redisson.shutdown();
+    }
+
+    @Test
+    public void testPutAllSyncUpdate() {
+        RLocalCachedMap<Object, Object> rLocalCachedMap1 = redisson.getLocalCachedMap("znMapTest1", LocalCachedMapOptions.defaults()
+                .evictionPolicy(EvictionPolicy.NONE)
+                .cacheSize(0)
+                .syncStrategy(SyncStrategy.UPDATE)
+                .reconnectionStrategy(ReconnectionStrategy.NONE)
+                .writeMode(WriteMode.WRITE_BEHIND));
+        Map<String, String> map = new HashMap<>();
+        map.put("test", "123");
+        rLocalCachedMap1.putAll(map);
     }
 
     @Test
