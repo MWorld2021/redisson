@@ -49,6 +49,7 @@ import java.util.function.Supplier;
  */
 public abstract class RedissonBaseLock extends RedissonExpirable implements RLock {
 
+    /*用于存储锁的过期时间和线程 ID。具体来说，它维护了一个 Map，将线程 ID 映射到一个计数器，以便在锁被释放时正确地处理多个线程持有锁的情况。*/
     public static class ExpirationEntry {
 
         private final Map<Long, Integer> threadIds = new LinkedHashMap<>();
@@ -58,7 +59,9 @@ public abstract class RedissonBaseLock extends RedissonExpirable implements RLoc
             super();
         }
 
+        /*提供了一些同步方法来添加、删除和获取线程 ID，以及设置和获取超时时间。*/
         public synchronized void addThreadId(long threadId) {
+            // 使用 compute 方法将线程 ID 添加到 threadIds Map 中，并将计数器加 1。如果计数器为 null，则将其设置为 0。最后，返回计数器的值。
             threadIds.compute(threadId, (t, counter) -> {
                 counter = Optional.ofNullable(counter).orElse(0);
                 counter++;
@@ -78,14 +81,23 @@ public abstract class RedissonBaseLock extends RedissonExpirable implements RLoc
         }
 
         public synchronized void removeThreadId(long threadId) {
+            /*threadIds.merge(threadId, -1, (oldValue, value) -> {
+                // oldValue 是线程 ID 对应的计数器的原值，value 是 -1。
+                int counter = oldValue + value;
+                return counter <= 0 ? null : counter;
+            });*/
+
             threadIds.compute(threadId, (t, counter) -> {
+                // 如果计数器为 null，则返回 null。再删
                 if (counter == null) {
                     return null;
                 }
+                // 如果计数器大于 1，则将其减 1。否则，从 threadIds Map 中删除该线程 ID。
                 counter--;
                 if (counter == 0) {
                     return null;
                 }
+                // 返回计数器的值。
                 return counter;
             });
         }
@@ -218,22 +230,38 @@ public abstract class RedissonBaseLock extends RedissonExpirable implements RLoc
         }
     }
 
+    /**
+     * 异步执行写操作，支持批量操作
+     *
+     * @param key             键
+     * @param codec           编解码器
+     * @param evalCommandType Redis命令类型
+     * @param script          脚本
+     * @param keys            键列表
+     * @param params          参数列表
+     * @param <T>             返回值类型
+     * @return 返回一个RFuture对象，表示异步执行结果
+     */
     protected <T> RFuture<T> evalWriteAsync(String key, Codec codec, RedisCommand<T> evalCommandType, String script, List<Object> keys, Object... params) {
+        // 获取复制信息
         CompletionStage<Map<String, String>> replicationFuture = CompletableFuture.completedFuture(Collections.emptyMap());
         if (!(commandExecutor instanceof CommandBatchService)
                 && !commandExecutor.getServiceManager().getConfig().checkSkipSlavesInit()) {
             replicationFuture = commandExecutor.writeAsync(getRawName(), RedisCommands.INFO_REPLICATION);
         }
+        // 处理复制信息
         CompletionStage<T> resFuture = replicationFuture.thenCompose(r -> {
             int availableSlaves = Integer.parseInt(r.getOrDefault("connected_slaves", "0"));
-
+            // 创建批量操作服务
             CommandBatchService executorService = createCommandBatchService(availableSlaves);
+            // 执行写操作
             RFuture<T> result = executorService.evalWriteAsync(key, codec, evalCommandType, script, keys, params);
             if (commandExecutor instanceof CommandBatchService) {
                 return result;
             }
-
+            // 执行批量操作
             RFuture<BatchResult<?>> future = executorService.executeAsync();
+            // 处理批量操作结果
             CompletionStage<T> f = future.handle((res, ex) -> {
                 if (ex != null) {
                     throw new CompletionException(ex);
@@ -472,17 +500,28 @@ public abstract class RedissonBaseLock extends RedissonExpirable implements RLoc
         return tryLockAsync(waitTime, leaseTime, unit, currentThreadId);
     }
 
+    /**
+     * 处理未同步的情况
+     *
+     * @param threadId           线程ID
+     * @param ttlRemainingFuture 剩余时间的CompletionStage
+     * @return 处理后的CompletionStage
+     */
     protected <T> CompletionStage<T> handleNoSync(long threadId, CompletionStage<T> ttlRemainingFuture) {
         CompletionStage<T> s = ttlRemainingFuture.handle((r, ex) -> {
+            // 如果出现异常，
             if (ex != null) {
+                // 判断异常的原因是否是"None of slaves were synced"，如果是，则调用unlockInnerAsync方法进行解锁，并将返回的CompletionStage再次进行处理。
                 if (ex.getCause().getMessage().equals("None of slaves were synced")) {
                     return unlockInnerAsync(threadId).handle((r1, e) -> {
                         if (e != null) {
                             if (e.getCause().getMessage().equals("None of slaves were synced")) {
                                 throw new CompletionException(ex.getCause());
                             }
+                            // 在处理过程中，如果出现异常，会将异常添加到原始异常的suppressed异常列表中，并最终抛出原始异常。
                             e.getCause().addSuppressed(ex.getCause());
                         }
+                        // 如果不是，则直接抛出异常。
                         throw new CompletionException(ex.getCause());
                     });
                 } else {

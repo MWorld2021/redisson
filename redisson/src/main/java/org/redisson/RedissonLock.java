@@ -216,17 +216,38 @@ public class RedissonLock extends RedissonBaseLock {
         return new CompletableFutureWrapper<>(f);
     }
 
+    /**
+     * Tries to acquire lock and returns remaining time to live of this lock instance.
+     * 尝试获取锁并返回此锁实例的剩余生存时间。
+     *
+     * @param waitTime  - wait time
+     *                  等待时间
+     * @param leaseTime - lease time
+     *                  租约时间
+     * @param unit      - time unit
+     *                  时间单位
+     * @param threadId  - id of thread
+     *                  线程ID
+     * @return remaining time to live of this lock instance or null if lock not acquired
+     * 此锁实例的剩余生存时间，如果未获取锁，则为null
+     * 首先根据leaseTime的值选择合适的锁超时时间，然后调用tryLockInnerAsync方法尝试获取锁。
+     * 如果获取锁成功，它会根据leaseTime的值更新锁的租约时间或者启动一个定时任务来定期续租锁。
+     * 如果获取锁失败，它会返回null。
+     */
     private <T> RFuture<Long> tryAcquireAsync(long waitTime, long leaseTime, TimeUnit unit, long threadId) {
         RFuture<Long> ttlRemainingFuture;
         if (leaseTime > 0) {
+            // 如果leaseTime大于0，则使用传入的leaseTime，使用tryLockInnerAsync方法用于尝试获取锁
             ttlRemainingFuture = tryLockInnerAsync(waitTime, leaseTime, unit, threadId, RedisCommands.EVAL_LONG);
         } else {
+            // 如果leaseTime小于等于0，则使用默认的锁租约时间internalLockLeaseTime
             ttlRemainingFuture = tryLockInnerAsync(waitTime, internalLockLeaseTime,
                     TimeUnit.MILLISECONDS, threadId, RedisCommands.EVAL_LONG);
         }
+        // handleNoSync方法用于处理异步获取锁的结果
         CompletionStage<Long> s = handleNoSync(threadId, ttlRemainingFuture);
         ttlRemainingFuture = new CompletableFutureWrapper<>(s);
-
+        // 如果获取锁成功，则根据leaseTime的值更新锁的租约时间或者启动一个定时任务来定期续租锁
         CompletionStage<Long> f = ttlRemainingFuture.thenApply(ttlRemaining -> {
             // lock acquired
             if (ttlRemaining == null) {
@@ -247,6 +268,17 @@ public class RedissonLock extends RedissonBaseLock {
     }
 
     <T> RFuture<T> tryLockInnerAsync(long waitTime, long leaseTime, TimeUnit unit, long threadId, RedisStrictCommand<T> command) {
+        /*
+            使用 evalWriteAsync 方法执行 Redis 命令，尝试获取锁。
+            如果锁不存在或者当前线程已经持有锁，则增加锁的计数器并设置锁的过期时间，然后返回 null。否则返回锁的剩余过期时间。
+            if ((redis.call('exists', KEYS[1]) == 0) or (redis.call('hexists', KEYS[1], ARGV[2]) == 1)) then
+                redis.call('hincrby', KEYS[1], ARGV[2], 1);
+                redis.call('pexpire', KEYS[1], ARGV[1]);
+                return nil;
+            end;
+            return redis.call('pttl', KEYS[1]);
+            其中 KEYS[1] 是锁的名称，ARGV[1] 是锁的过期时间，ARGV[2] 是当前线程的 ID。
+         */
         return evalWriteAsync(getRawName(), LongCodec.INSTANCE, command,
                 "if ((redis.call('exists', KEYS[1]) == 0) " +
                         "or (redis.call('hexists', KEYS[1], ARGV[2]) == 1)) then " +

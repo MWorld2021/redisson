@@ -17,12 +17,16 @@ public class RedissonSemaphoreTest extends BaseConcurrentTest {
 
     @Test
     public void testAcquireAfterAddPermits() throws InterruptedException {
+        // 按名称返回信号量实例
         RSemaphore s = redisson.getSemaphore("test");
 
+        // 设置信号量的许可证数量
         CountDownLatch l = new CountDownLatch(1);
         Thread t1 = new Thread(() -> {
+            // 从信号量获取给定数目的许可证，阻塞直到获取到许可证
             s.addPermits(1);
             try {
+                // 获得规定数量的许可证。必要时等待，直到所有许可证可用。
                 s.acquire(2);
                 l.countDown();
             } catch (InterruptedException e) {
@@ -31,6 +35,7 @@ public class RedissonSemaphoreTest extends BaseConcurrentTest {
         });
 
         t1.start();
+        // 等待此线程死亡的时间最多为毫秒。超时0意味着永远等待。
         t1.join(1000);
         assertThat(l.await(1, TimeUnit.SECONDS)).isFalse();
         s.acquire();
